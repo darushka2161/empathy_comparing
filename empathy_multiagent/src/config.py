@@ -44,9 +44,9 @@ MODEL_REGISTRY = {
         "api_key_env": "MISTRAL_API_KEY",
         "provider": "mistral",
         "size": "24B",
-        "max_rpm": 2,
+        "max_rpm": 30,
         "max_rpd": 99999,
-        "notes": "Experiment tier: 2 RPM, 1B токенов/мес бесплатно.",
+        "notes": "Experiment tier: 2 RPM реальный лимит, но retry обрабатывает 429 сам.",
     },
 
     # === GITHUB MODELS (бесплатно) ===

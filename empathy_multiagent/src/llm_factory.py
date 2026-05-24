@@ -1,6 +1,7 @@
 # llm_factory.py
 
 import os
+import re
 import time
 import json
 import asyncio
@@ -19,18 +20,22 @@ class LLMFactory:
         self.cfg = (config or MODEL_REGISTRY)[model_key]
         self.model_key = model_key
 
-        api_key = os.environ.get(self.cfg["api_key_env"])
-        if not api_key:
+        # Поддержка нескольких ключей через запятую: KEY=key1,key2,key3
+        raw_keys = os.environ.get(self.cfg["api_key_env"], "")
+        keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
+        if not keys:
             raise ValueError(
                 f"API key not found. Set environment variable:\n"
                 f"  export {self.cfg['api_key_env']}=your_key_here\n"
                 f"Get it from: {self._get_signup_url()}"
             )
 
-        self.client = AsyncOpenAI(
-            base_url=self.cfg["base_url"],
-            api_key=api_key,
-        )
+        self._clients = [
+            AsyncOpenAI(base_url=self.cfg["base_url"], api_key=k)
+            for k in keys
+        ]
+        self._key_idx = 0
+        self._rotation_streak = 0  # сколько ротаций подряд без успешного вызова
         self.model = self.cfg["model"]
         self.max_rpm = self.cfg.get("max_rpm", 30)
         self._last_call_time = 0.0
@@ -47,6 +52,15 @@ class LLMFactory:
             "local-vllm": "запусти сервер: python serve_local.py --model <key>",
         }
         return urls.get(self.cfg["provider"], "check provider docs")
+
+    def _rotate_key(self) -> bool:
+        """Переключает на следующий ключ. Возвращает True если прошли полный круг."""
+        self._key_idx = (self._key_idx + 1) % len(self._clients)
+        self._last_call_time = 0.0
+        self._rotation_streak += 1
+        full_cycle = (self._rotation_streak % len(self._clients) == 0)
+        print(f"  [Key rotation] -> key {self._key_idx + 1}/{len(self._clients)}")
+        return full_cycle
 
     async def _rate_limit(self):
         """Простой rate limiter: не больше max_rpm запросов в минуту.
@@ -80,7 +94,10 @@ class LLMFactory:
                 + system_prompt
             )
 
-        for attempt in range(retries):
+        # С несколькими ключами нужно больше попыток: N ключей * 3 цикла + запас
+        effective_retries = max(retries, len(self._clients) * 3) if len(self._clients) > 1 else retries
+
+        for attempt in range(effective_retries):
             try:
                 await self._rate_limit()
                 # Если модель требует больше токенов (напр. для завершения <think>-блока)
@@ -106,11 +123,12 @@ class LLMFactory:
                         create_kwargs["extra_body"] = {
                             "chat_template_kwargs": {"enable_thinking": False}
                         }
-                response = await self.client.chat.completions.create(**create_kwargs)
+                response = await self._clients[self._key_idx].chat.completions.create(**create_kwargs)
                 text = response.choices[0].message.content.strip()
                 # Убираем блоки <think>...</think> (Qwen-3, DeepSeek-R1 и др.)
                 if "<think>" in text and "</think>" in text:
                     text = text[text.rfind("</think>") + len("</think>"):].strip()
+                self._rotation_streak = 0  # успешный вызов — сбрасываем счётчик
                 return text
             except Exception as e:
                 wait = 2 ** attempt
@@ -118,13 +136,27 @@ class LLMFactory:
                 err_str = str(e)
                 if "Please try again in" in err_str:
                     try:
-                        after = float(
-                            err_str.split("Please try again in")[1]
-                            .strip().split("s")[0]
-                        )
-                        wait = max(wait, after + 1.0)
-                    except (ValueError, IndexError):
+                        raw = err_str.split("Please try again in")[1].strip()
+                        m = re.match(r'(\d+)m([\d.]+)s', raw)
+                        if m:
+                            after = int(m.group(1)) * 60 + float(m.group(2))
+                        else:
+                            m = re.match(r'([\d.]+)s', raw)
+                            after = float(m.group(1)) if m else 0.0
+                        if after > 5.0 and len(self._clients) > 1:
+                            full_cycle = self._rotate_key()
+                            if full_cycle:
+                                print(f"  [All {len(self._clients)} keys exhausted] waiting 3 minutes...")
+                                wait = 180.0
+                            else:
+                                wait = 1.0
+                        else:
+                            wait = max(wait, after + 1.0)
+                    except (ValueError, AttributeError):
                         pass
+                elif "timed out" in err_str.lower() and len(self._clients) > 1:
+                    self._rotate_key()
+                    wait = 1.0
                 print(f"  [Retry {attempt + 1}/{retries}] {type(e).__name__}: {e}")
                 print(f"  Waiting {wait:.1f}s...")
                 await asyncio.sleep(wait)

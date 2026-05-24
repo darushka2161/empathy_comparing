@@ -23,6 +23,7 @@ from architectures.empathy_loop import empathy_loop
 from architectures.empathy_rag import EmpathyRetriever, empathy_rag
 from architectures.empathy_mas_c import empathy_mas_c
 from architectures.empathy_trace import empathy_trace
+from architectures.empathy_insideout import empathy_insideout
 from src.metrics import compute_all_metrics, compute_rag_metrics
 import numpy as np
 
@@ -103,6 +104,7 @@ ARCHITECTURES = {
     "empathy_rag": empathy_rag_wrapper,
     "empathy_mas_c": empathy_mas_c_wrapper,
     "empathy_trace": empathy_trace_wrapper,
+    "empathy_insideout": empathy_insideout,
 }
 
 
@@ -136,6 +138,27 @@ async def run_experiment(
     arch_fn = ARCHITECTURES[arch_name]
     examples = prepare_examples("test", limit)
 
+    out_dir = Path("outputs")
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / f"{model_key}_{arch_name}.json"
+
+    # Загружаем уже обработанные примеры (resume после обрыва)
+    results = []
+    done_ids: set = set()
+    if out_path.exists():
+        try:
+            with open(out_path, encoding="utf-8") as f:
+                existing = json.load(f)
+            if existing.get("partial"):
+                all_prev = existing.get("results", [])
+                # Берём только успешные — ошибки будут ретраиться
+                results = [r for r in all_prev if not r.get("error")]
+                done_ids = {r["conv_id"] for r in results}
+                errors_prev = len(all_prev) - len(results)
+                print(f"Resuming: {len(done_ids)} done, {errors_prev} errors will be retried, from {out_path.name}")
+        except Exception:
+            pass
+
     print(f"\n{'=' * 60}")
     print(f"Model:        {llm.info}")
     print(f"Architecture: {arch_name}")
@@ -144,8 +167,9 @@ async def run_experiment(
         print("BERTScore:    SKIPPED (--no-bertscore flag)")
     print(f"{'=' * 60}\n")
 
-    results = []
     for ex in tqdm(examples, desc=f"{model_key}/{arch_name}"):
+        if ex["conv_id"] in done_ids:
+            continue
         try:
             r = await run_single(ex, arch_fn, llm)
             results.append(r)
@@ -159,6 +183,10 @@ async def run_experiment(
                 "error": str(e),
                 "latency_ms": 0,
             })
+        # Сохраняем после каждого примера
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump({"model": model_key, "architecture": arch_name,
+                       "partial": True, "results": results}, f, ensure_ascii=False)
 
     # Метрики
     hypotheses = [r["generated_response"] for r in results if r.get("generated_response")]
@@ -214,9 +242,6 @@ async def run_experiment(
         "results": results,
     }
 
-    out_dir = Path("outputs")
-    out_dir.mkdir(exist_ok=True)
-    out_path = out_dir / f"{model_key}_{arch_name}.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 

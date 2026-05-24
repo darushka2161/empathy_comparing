@@ -29,6 +29,7 @@ v2_vkr/
 │   │   ├── empathy_few_shot.py    # 1 LLM-вызов + few-shot примеры
 │   │   ├── empathy_ektc.py        # TOOL-ED/EKTC + COMET
 │   │   ├── empathy_trace.py       # TRACE (Liu et al., 2025): 4 вызова + RAG
+│   │   ├── empathy_insideout.py   # InsideOut (ACL 2024): 4 агента-эмоции + агрегатор: 6 вызовов
 │   │   ├── empathy_chain.py       # Каскадная цепочка: 4 вызова
 │   │   ├── empathy_debate.py      # 3 агента + арбитр: 5 вызовов
 │   │   ├── empathy_loop.py        # Итеративная рефинация: 5–11 вызовов
