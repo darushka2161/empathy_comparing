@@ -15,6 +15,7 @@ emotion_classifier.py
 
 
 *.txt
+!empathy_multiagent/requirements.txt
 
 retriever_cache
 outputs

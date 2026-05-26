@@ -24,6 +24,8 @@ from architectures.empathy_rag import EmpathyRetriever, empathy_rag
 from architectures.empathy_mas_c import empathy_mas_c
 from architectures.empathy_trace import empathy_trace
 from architectures.empathy_insideout import empathy_insideout
+from architectures.chain_of_empathy import chain_of_empathy
+from architectures.empathy_zero_shot_short import empathy_zero_shot_short
 from src.metrics import compute_all_metrics, compute_rag_metrics
 import numpy as np
 
@@ -105,6 +107,8 @@ ARCHITECTURES = {
     "empathy_mas_c": empathy_mas_c_wrapper,
     "empathy_trace": empathy_trace_wrapper,
     "empathy_insideout": empathy_insideout,
+    "chain_of_empathy": chain_of_empathy,
+    "empathy_zero_shot_short": empathy_zero_shot_short,
 }
 
 
@@ -259,12 +263,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model",
-        default="llama-3.1-8b",
+        default="mistral-small-3.2",
         help=(
             "Model key from config.py MODEL_REGISTRY. "
-            "Available: llama-3.1-8b, llama-3.3-70b, llama-3.3-70b-cerebras, "
-            "gemini-2.5-flash, gemini-2.5-pro, mistral-small, gpt-4o-mini, deepseek-v3, "
-            "qwen-2.5-7b, qwen-2.5-14b, qwen-2.5-32b"
+            "Available: mistral-small-3.2, qwen3-32b-local, llama-3.1-8b-local"
         ),
     )
     parser.add_argument(
